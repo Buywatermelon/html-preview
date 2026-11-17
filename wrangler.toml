@@ -1,0 +1,32 @@
+name = "html-preview"
+main = "src/index.ts"
+compatibility_date = "2026-11-04"
+workers_dev = false
+preview_urls = false
+routes = [
+  { pattern = "html.1997117.xyz", custom_domain = true },
+]
+
+[vars]
+PUBLIC_BASE_URL = "https://html.1997117.xyz"
+S3_ENDPOINT = "https://example.r2.cloudflarestorage.com"
+S3_BUCKET = "html-preview"
+S3_REGION = "auto"
+ADMIN_GITHUB_LOGIN = "replace-at-deploy"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "html-preview"
+database_id = "c1a788ac-00c6-4b1c-85af-9f9db3db24d8"
+migrations_dir = "migrations"
+
+[[durable_objects.bindings]]
+name = "EVENTS"
+class_name = "HtmlPreviewEvents"
+
+[[migrations]]
+tag = "html-preview-events-v1"
+new_sqlite_classes = ["HtmlPreviewEvents"]
+
+[triggers]
+crons = []

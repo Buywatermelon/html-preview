@@ -1,0 +1,10 @@
+# Optional. Copy to .dev.vars and set locally; never commit real values.
+# GITHUB_CLIENT_ID=
+# GITHUB_CLIENT_SECRET=
+# ADMIN_GITHUB_LOGIN=
+# ALLOW_DEV_LOGIN=1
+# S3_ENDPOINT=https://s3.example.com
+# S3_BUCKET=html-preview
+# S3_REGION=auto
+# S3_ACCESS_KEY_ID=
+# S3_SECRET_ACCESS_KEY=

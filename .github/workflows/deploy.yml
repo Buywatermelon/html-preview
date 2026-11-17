@@ -1,0 +1,108 @@
+name: Check and deploy html-preview
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'frontend/**'
+      - 'src/**'
+      - 'test/**'
+      - 'skills/**'
+      - 'scripts/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'tsconfig.json'
+      - 'migrations/**'
+      - 'Dockerfile'
+      - '.dockerignore'
+      - 'compose.yaml'
+      - 'wrangler.toml'
+      - '.github/workflows/deploy.yml'
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: '24'
+          cache: npm
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.12'
+      - run: npm ci
+      - run: npm run check
+      - run: python3 -m unittest discover -s test -p '*_test.py'
+      - run: npm run build
+      - run: docker build -t html-preview .
+
+  deploy:
+    needs: check
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    concurrency:
+      group: html-preview-production
+      cancel-in-progress: false
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      ADMIN_GITHUB_LOGIN: ${{ github.repository_owner }}
+      WRANGLER_SEND_METRICS: 'false'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - name: Detect migration changes
+        id: migrations
+        if: github.event_name == 'push'
+        env:
+          BEFORE: ${{ github.event.before }}
+        run: |
+          if [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          elif git diff --name-only "$BEFORE" "$GITHUB_SHA" -- migrations/ | grep -q .; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Render deploy config
+        run: node scripts/render-deploy-config.mjs wrangler.deploy.toml
+      - name: Apply metadata schema
+        if: steps.migrations.outputs.changed == 'true'
+        run: npx wrangler d1 migrations apply html-preview --remote --config wrangler.deploy.toml
+      - name: Build client bundle
+        run: npm run build:client
+      - name: Deploy existing Worker
+        run: |
+          npx wrangler deploy --config wrangler.deploy.toml --message "GitHub ${GITHUB_SHA}"
+          rm -f wrangler.deploy.toml
+      - name: Verify deployed dashboard
+        run: |
+          curl --fail --silent --show-error --retry 3 --retry-delay 2 \
+            https://html.1997117.xyz/dashboard -o /tmp/dashboard.html
+          curl --fail --silent --show-error --retry 3 --retry-delay 2 \
+            https://html.1997117.xyz/assets/client.js -o /tmp/client.js
+          python3 - <<'PY'
+          from pathlib import Path
+          page = Path('/tmp/dashboard.html').read_text()
+          js = Path('/tmp/client.js').read_text()
+          assert '<title>html-preview</title>' in page
+          assert 'id="root"' in page
+          assert '/assets/client.js' in page and '/assets/client.css' in page
+          assert 'stage-fav' not in page and 'stage-fav' not in js
+          assert 'hp-tree' in js and 'html-preview:toggle-sidebar' in js
+          PY

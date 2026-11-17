@@ -1,0 +1,11 @@
+services:
+  html-preview:
+    build: .
+    ports:
+      - "3000:3000"
+    env_file: .env
+    volumes:
+      - html-preview:/data
+    restart: unless-stopped
+volumes:
+  html-preview:
