@@ -49,8 +49,8 @@ it("keeps a single simplified public share UI in topbar without redundant descri
   expect(appSrc).toContain('id="share-popover"');
   expect(appSrc).toContain('id="share-url-text"');
   expect(appSrc).toContain('id="btn-unshare"');
-  expect(appSrc).toContain("已复制公开链接");
-  expect(appSrc).toContain("已取消公开");
+  expect(appSrc).toContain("已复制开窗链接");
+  expect(appSrc).toContain("已掩窗");
 
   expect(appSrc).not.toContain(">复制公开链接<");
   expect(appSrc).not.toContain('label="复制公开链接"');
@@ -61,4 +61,18 @@ it("keeps a single simplified public share UI in topbar without redundant descri
   expect(appSrc).not.toContain("无需登录即可通过此链接");
   expect(appSrc).not.toContain("取消后此链接立即返回 404");
   expect(appSrc).not.toContain("已取消公开，原分享链接已立即失效");
+});
+
+it("puts 落叶 before 开窗 and keeps deletion out of directory rows", () => {
+  const toolbar = appSrc.slice(appSrc.indexOf('className="hp-toolbar-actions"'));
+  const fall = toolbar.indexOf('id="btn-fall"');
+  expect(fall).toBeGreaterThan(-1);
+  expect(fall).toBeLessThan(toolbar.indexOf('id="btn-share-create"'));
+  expect(toolbar).toContain('"开窗中…" : "开窗"');
+  expect(toolbar).toContain('"掩窗中…" : "掩窗"');
+  expect(toolbar).toContain('className="hp-interact-btn-label">留痕');
+  expect(appSrc).not.toContain('onClick={() => setDeleteTarget(item)}');
+  expect(appSrc).toContain('title="叶落，便不再回枝。"');
+  expect(appSrc).toContain('cancelLabel="再留留"');
+  expect(appSrc).toContain('actionLabel="落下"');
 });

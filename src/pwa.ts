@@ -11,7 +11,7 @@ export function pwaManifestResponse(method = "GET"): Response {
   const manifest = {
     name: "html-preview 工作台",
     short_name: "html-preview",
-    description: "审阅 Coding Agent 产出的 HTML、划词批注并实时接收回复与新版本",
+    description: "审阅 Coding Agent 产出的 HTML、划词留痕并实时接收回复与新版本",
     start_url: "/dashboard",
     scope: "/",
     display: "standalone",
@@ -128,7 +128,7 @@ export function buildWebPushPayload(
     title = `已生成 v${interaction.resultVersion} · ${docTitle}`;
     body = interaction.replyText
       ? interaction.replyText.slice(0, 120)
-      : `Agent 已针对你的批注更新 HTML 至 v${interaction.resultVersion}`;
+      : `Agent 已针对你的留痕更新 HTML 至 v${interaction.resultVersion}`;
   } else if (kind === "replied") {
     title = `Agent 已回复 · ${docTitle}`;
     body = (interaction.replyText || "点击查看详细答复").slice(0, 120);

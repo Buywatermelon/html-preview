@@ -1,4 +1,5 @@
 import { HttpError } from "./common";
+import { hash } from "./auth";
 import type { Database } from "./database";
 
 export interface User {
@@ -68,10 +69,27 @@ export class Catalog {
   async byShareToken(token: string): Promise<Document | undefined> {
     return (
       await this.db.all<Document>(
-        "SELECT * FROM documents WHERE share_token = ? AND deleting = 0",
+        "SELECT * FROM documents WHERE share_token = ?",
         [token],
       )
     )[0];
+  }
+
+  async isFallenPage(selector: string, ownerId: string): Promise<boolean> {
+    const digest = await hash(selector);
+    const rows = await this.db.all(
+      "SELECT 1 FROM page_tombstones WHERE (id_hash = ? OR public_id_hash = ?) AND owner_id = ?",
+      [digest, digest, ownerId],
+    );
+    return rows.length > 0;
+  }
+
+  async isFallenShare(token: string): Promise<boolean> {
+    const rows = await this.db.all(
+      "SELECT 1 FROM page_tombstones WHERE share_token_hash = ?",
+      [await hash(token)],
+    );
+    return rows.length > 0;
   }
 
   async versions(id: string): Promise<Version[]> {

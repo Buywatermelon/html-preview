@@ -559,7 +559,7 @@ export class InteractStore {
       ? targetOnline
         ? `已派发至 ${targetHostName || targetHostId} 队列`
         : `已加入队列，等待 ${targetHostName || targetHostId} 唤醒`
-      : "批注已保存，等待守护进程认领";
+      : "留痕已保存，等待守护进程认领";
 
     const eventPayload = JSON.stringify({
       status: "pending",

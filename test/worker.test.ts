@@ -161,7 +161,7 @@ describe("migrations and schema cleanup", () => {
       const freshApplied = fresh
         .prepare("SELECT name FROM _migrations ORDER BY name")
         .all() as Array<{ name: string }>;
-      expect(freshApplied.map(r => r.name)).toEqual(["0001_init.sql"]);
+      expect(freshApplied.map(r => r.name)).toEqual(["0001_init.sql", "0002_page_tombstones.sql"]);
     } finally {
       fresh.close();
     }
@@ -252,7 +252,7 @@ describe("migrations and schema cleanup", () => {
       const applied = legacy.prepare("SELECT name FROM _migrations ORDER BY name").all() as Array<{
         name: string;
       }>;
-      expect(applied.map(r => r.name)).toEqual(["0001_init.sql"]);
+      expect(applied.map(r => r.name)).toEqual(["0001_init.sql", "0002_page_tombstones.sql"]);
 
       const indexes = (
         legacy.prepare("SELECT name FROM sqlite_master WHERE type = 'index'").all() as Array<{
@@ -341,7 +341,7 @@ describe("migrations and schema cleanup", () => {
       `);
       applyMigrations(pre0006);
       const migs = pre0006.prepare("SELECT name FROM _migrations").all() as Array<{ name: string }>;
-      expect(migs).toEqual([{ name: "0001_init.sql" }]);
+      expect(migs).toEqual([{ name: "0001_init.sql" }, { name: "0002_page_tombstones.sql" }]);
       const keptInt = pre0006
         .prepare("SELECT id, target_host_id FROM interactions WHERE id = 'int1'")
         .get() as { id: string; target_host_id: string | null };
@@ -1141,7 +1141,7 @@ describe("public share links (/s/:token) and four-layer sandbox isolation", () =
     // Historical /v1/ path is strictly 404 on /s/<token>/ while still accessible to owner via /p/
     const v1PubRes = await h.request(`${sharePath}v1/`, "");
     expect(v1PubRes.status).toBe(404);
-    expect(await v1PubRes.text()).toContain("该公开分享链接不存在或已取消公开");
+    expect(await v1PubRes.text()).toContain("请向分享者获取开窗链接。");
     expect(await (await h.request(raw(v1.versionUrl), "alice")).text()).toBe(
       await injectSidebarBridge("<body>v1-draft</body>"),
     );
@@ -1193,7 +1193,7 @@ describe("public share links (/s/:token) and four-layer sandbox isolation", () =
     expect(await subPage.text()).toBe("<h2>Sub Page</h2>");
   });
 
-  it("revokes access immediately on unshare, rotates token on re-share, and 404s on document deletion", async () => {
+  it("revokes access immediately on unshare and rotates the link on re-share", async () => {
     const doc = await data(await h.upload("<body>rotatable</body>", "alice", "rotate-doc"));
     const firstShare = await data(
       await h.request(`/api/archives/${doc.id}/share`, "alice", { method: "POST" }),
@@ -1214,7 +1214,7 @@ describe("public share links (/s/:token) and four-layer sandbox isolation", () =
     const revokedRes = await h.request(firstPath, "");
     expect(revokedRes.status).toBe(404);
     expect(revokedRes.headers.get("Cache-Control")).toBe("no-store");
-    expect(await revokedRes.text()).toContain("该公开分享链接不存在或已取消公开");
+    expect(await revokedRes.text()).toContain("请向分享者获取开窗链接。");
 
     // Re-sharing generates a brand new token; old link remains dead
     const secondShare = await data(
@@ -1225,9 +1225,112 @@ describe("public share links (/s/:token) and four-layer sandbox isolation", () =
     const secondPath = raw(secondShare.shareUrl);
     expect((await h.request(secondPath, "")).status).toBe(200);
 
-    // Deleting the shared document immediately invalidates the active share link
-    await data(await h.request(`/api/archives/${doc.id}`, "alice", { method: "DELETE" }));
-    expect((await h.request(secondPath, "")).status).toBe(404);
+  });
+
+  it("purges every version, asset and interaction and leaves only opaque link tombstones", async () => {
+    const first = await data(await h.upload("<body>original draft</body>", "alice", "fall-me"));
+    const archivePath = `/api/archives/${first.id}`;
+    const shared = await data(await h.request(`${archivePath}/share`, "alice", { method: "POST" }));
+    const files = zipSync({
+      "index.html": strToU8("<body>original final</body>"),
+      "assets/site.css": strToU8("body { color: red; }"),
+    });
+    const second = await data(await h.request("/upload?name=fall-me", "alice", {
+      method: "POST",
+      headers: { "Content-Type": "application/zip" },
+      body: files,
+    }));
+    await data(await h.send(`${archivePath}/bindings`, { adapterId: "claude", sessionRef: "session-1" }));
+    await data(await h.send(`${archivePath}/interactions`, {
+      requestId: "fall-interaction", intent: "change", prompt: "Original interaction",
+    }));
+    expect(h.objects.size).toBe(3);
+    expect((await h.request(`${raw(second.versionUrl)}assets/site.css`)).headers.get("Cache-Control")).toBe("no-store");
+
+    await data(await h.request(archivePath, "alice", { method: "DELETE" }));
+
+    const privatePath = raw(first.url);
+    const publicPath = raw(shared.shareUrl);
+    for (const [path, user] of [
+      [privatePath, "alice"], [privatePath.slice(0, -1), "alice"], [`/p/${first.id}/`, "alice"],
+      [raw(first.versionUrl), "alice"], [raw(second.versionUrl), "alice"],
+      [`${raw(second.versionUrl)}assets/site.css`, "alice"],
+      [publicPath, ""], [publicPath.slice(0, -1), ""], [`${publicPath}assets/site.css`, ""],
+    ]) {
+      const response = await h.request(path, user);
+      expect(response.status).toBe(200);
+      expect(response.headers.get("Cache-Control")).toBe("no-store");
+      const body = await response.text();
+      expect(body).toContain("<h1>此页已落</h1>");
+      expect(body).not.toMatch(/original|fall-me|html-preview:toggle-sidebar/i);
+      const head = await h.request(path, user, { method: "HEAD" });
+      expect(head.status).toBe(200);
+      expect(await head.text()).toBe("");
+    }
+    expect((await h.request(privatePath, "bob")).status).toBe(404);
+    expect((await h.request(privatePath, "")).status).toBe(302);
+    expect((await h.request(archivePath, "bob", { method: "DELETE" })).status).toBe(404);
+    await data(await h.request(archivePath, "alice", { method: "DELETE" }));
+    expect((await data(await h.request("/api/catalog"))).archives).toEqual([]);
+    expect(h.objects.size).toBe(0);
+    for (const table of ["documents", "versions", "session_bindings", "interactions", "interaction_deliveries", "interaction_events"]) {
+      expect(await h.db.all(`SELECT * FROM ${table}`)).toEqual([]);
+    }
+    expect(await h.db.all("SELECT * FROM page_tombstones")).toEqual([{
+      id_hash: await hash(first.id),
+      public_id_hash: await hash(privatePath.split("/")[2]),
+      owner_id: "alice",
+      share_token_hash: await hash(publicPath.split("/")[2]),
+    }]);
+
+    const replacement = await data(await h.upload("<body>fresh page</body>", "alice", "fall-me"));
+    expect(replacement.url).not.toBe(first.url);
+    expect(await (await h.request(privatePath)).text()).toContain("此页已落");
+  });
+
+  it("hides all content during partial deletion and supports retrying the storage cleanup", async () => {
+    const doc = await data(await h.upload("<body>first</body>"));
+    await data(await h.upload("<body>second</body>"));
+    const archivePath = `/api/archives/${doc.id}`;
+    const shared = await data(await h.request(`${archivePath}/share`, "alice", { method: "POST" }));
+    const remove = h.store.delete;
+    vi.spyOn(h.store, "delete").mockImplementationOnce(remove).mockRejectedValueOnce(Error("storage outage"));
+
+    expect((await h.request(archivePath, "alice", { method: "DELETE" })).status).toBe(503);
+    expect(h.objects.size).toBe(1);
+    expect(await (await h.request(raw(doc.url))).text()).toContain("此页已落");
+    expect(await (await h.request(raw(shared.shareUrl), "")).text()).toContain("此页已落");
+    expect((await h.upload()).status).toBe(409);
+
+    const retries = await Promise.all([
+      h.request(archivePath, "alice", { method: "DELETE" }),
+      h.request(archivePath, "alice", { method: "DELETE" }),
+    ]);
+    expect(retries.map(response => response.status)).toEqual([200, 200]);
+    expect(h.objects.size).toBe(0);
+  });
+
+  it("rejects an upload that started on a page before it fell", async () => {
+    const doc = await data(await h.upload());
+    const put = h.store.put;
+    const started = Promise.withResolvers<void>();
+    const resume = Promise.withResolvers<void>();
+    vi.spyOn(h.store, "put").mockImplementationOnce(async (...args) => {
+      started.resolve();
+      await resume.promise;
+      await put(...args);
+    });
+    const upload = h.upload("<body>concurrent upload</body>");
+    await started.promise;
+    try {
+      await data(await h.request(`/api/archives/${doc.id}`, "alice", { method: "DELETE" }));
+    } finally {
+      resume.resolve();
+    }
+    expect((await upload).status).toBe(409);
+    expect(h.objects.size).toBe(0);
+    expect((await data(await h.request("/api/catalog"))).archives).toEqual([]);
+    expect(await (await h.request(raw(doc.url))).text()).toContain("此页已落");
   });
 
   it("blocks Origin: null on /api/* and /upload, never leaks CORS on private routes, and sets anti-framing headers", async () => {
