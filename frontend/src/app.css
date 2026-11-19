@@ -2002,6 +2002,10 @@ body.hp-is-resizing iframe {
     min-height: 38px;
   }
 
+  .hp-toolbar-actions > .hp-version-select {
+    max-width: min(26vw, 130px);
+  }
+
   .hp-share-anchor {
     position: static;
   }
@@ -2055,6 +2059,22 @@ body.hp-is-resizing iframe {
   .hp-interact-drawer .hp-composer-textarea {
     min-height: 44px;
     font-size: 16px;
+  }
+}
+
+@media (max-width: 420px) {
+  .hp-toolbar,
+  .hp-toolbar-actions {
+    gap: 4px;
+  }
+
+  .hp-toolbar-actions > .hp-btn,
+  .hp-toolbar-actions .hp-share-anchor > button {
+    padding-inline: 6px;
+  }
+
+  .hp-toolbar-actions .hp-btn-interact > svg {
+    display: none;
   }
 }
 

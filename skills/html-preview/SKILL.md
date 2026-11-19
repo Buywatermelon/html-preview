@@ -1,13 +1,13 @@
 ---
 name: html-preview
 description: >-
-  生成或修改供用户预览的 HTML、报告或静态站后，自动归类上传到个人私有空间「我的」，返回在线预览链接；按用户要求开启或撤回单页免登录公开分享链接。
+  归类上传 HTML、报告或静态站到个人私有空间「我的」，返回在线预览链接。按用户要求开窗生成单页免登录链接，或掩窗撤回链接。
   Use after creating or updating HTML deliverables, including answer-me-with-html reports.
 ---
 
 # html-preview
 
-HTML 交付默认归类上传到个人私有空间「我的」（包含 `answer-me-with-html` 报告），返回的 `/p/...` 预览链接仅本人登录工作台后可访问。仅当用户明确需要对外免登录分享某个页面时，运行 `html-preview share` 交付公开链接 `shareUrl`（`/s/<token>/`）；用户要求撤回外链时运行 `html-preview unshare`。用户明确要求仅本地时跳过。
+HTML 交付默认归类上传到个人私有空间「我的」（包含 `answer-me-with-html` 报告），返回的 `/p/...` 预览链接仅本人登录工作台后可访问。仅在用户明确要求免登录分享时，运行 `html-preview share` 开窗并交付 `shareUrl`（`/s/<token>/`）。用户要求掩窗时运行 `html-preview unshare`。用户明确要求仅本地时跳过。
 
 ## 常规上传与目录内排序
 
@@ -29,20 +29,19 @@ html-preview upload ./outputs/report.html
 
 打开成功返回的 `url` 检查后交付在线链接。`versionUrl` 固定本次版本。私有预览链接（`/p/...`）仅本人登录工作台后可访问。
 
-## 单页公开分享与撤回（`share` / `unshare`）
+## 开窗与掩窗（`share` / `unshare`）
 
 ```bash
-# 开启或获取单页免登录公开分享链接（幂等，支持本地路径、--name 或 --id 三选一）
+# 开窗或获取已有链接（可用本地路径、--name 或 --id）
 html-preview share ./outputs/report.html
 html-preview share --name report-page
 
-# 取消公开分享（原公开链接立即返回 404）
+# 掩窗撤回链接
 html-preview unshare ./outputs/report.html
 ```
 
-- **默认私有、按需公开**：不要在未获要求时自动开启公开分享；当用户明确要求“发给别人看”“生成免登录外链”或“公开分享”时，运行 `share` 并向用户展示返回的 `shareUrl`（形如 `https://.../s/<token>/`）。
-- **自动跟随最新版本**：公开链接 `/s/<token>/` 始终渲染该页面的**最新版本**（不暴露历史草稿版本）。后续继续 `html-preview upload` 更新同一页面时，已发出的 `shareUrl` 刷新即见最新版，且 `.html-preview.json` 中的 `shareUrl` 会自动保留。
-- **幂等与撤销轮换**：对已公开页面重复执行 `share` 返回同一个 `shareUrl`；执行 `unshare` 后清空公开令牌并移除本地绑定中的 `shareUrl`，原链接立即返回 `404`（之后若重新 `share` 将签发全新随机 token）。
+- 开窗链接始终显示最新版本，续传会保留同一个 `shareUrl`。
+- 对已开窗页面重复执行 `share` 会返回同一个链接。`unshare` 撤回链接并清除本地绑定中的 `shareUrl`，掩窗后再次开窗会生成新链接。
 
 ## 改已有页面
 
@@ -53,9 +52,9 @@ html-preview delete ./outputs/report.html --dry-run
 html-preview delete ./outputs/report.html --yes
 ```
 
-`edit` 改标题或目录。本地绑定仍是同一个 id 和 name，之后 `upload` 续版本。排序靠标题编号。`delete` 删除个人空间中的指定页面；没有 `--yes` 不会删。
+`edit` 修改标题或目录，之后可继续用 `upload` 续版本。排序靠标题编号。顶栏「落叶」与 `delete --yes` 都会删除整页的所有版本、资源及留痕。本人链接及落叶时有效的开窗链接显示「此页已落」。
 
-## 页面双向对话、ACP 会话与回填（`bind` / `--bind` / `--resolves` / `reply` / `session`）
+## 留痕、ACP 会话与回填（`bind` / `--bind` / `--resolves` / `reply` / `session`）
 
 网页是第一操作入口，本机 `daemon` 作为标准 ACP v1 客户端与 coding agent 通信，网页通过 `/api/events` 实时查看全量会话轨迹（历史消息、工具调用、流式输出、取消与权限审批），并提供两个核心动作：
 - **传话给原会话**：发送按钮始终可用。若后续用户在网页上要求继续改 HTML、直接在仓库落地实现，或委派另一个 coding agent 执行，页面不会提供额外派工按钮——原会话直接收到带页面/选区锚点的消息（及 `HTML_PREVIEW_INTERACTION_ID`），自行修改并续传 `--resolves`、直接改代码，或按本机 skill/子代理拆分派工后回报结果。
@@ -87,7 +86,7 @@ html-preview session claude --resume <session-id>
 # 在终端发起 RFC 8628 设备码登录（默认安装并自启本机 daemon；CI=true 或传 --no-daemon 时仅跳过登录期安装）
 html-preview login https://html.1997117.xyz
 
-# 查看、拉取待处理评论或管理本机常驻守护进程
+# 查看、拉取待处理留痕或管理本机常驻守护进程
 html-preview daemon status
 html-preview daemon drain
 html-preview daemon logs

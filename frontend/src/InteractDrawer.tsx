@@ -1032,7 +1032,7 @@ export function InteractDrawer({
               : ""
           }`}
           role="region"
-          aria-label="划词批注快捷操作"
+          aria-label="划词留痕快捷操作"
         >
           <button
             type="button"
@@ -1040,7 +1040,7 @@ export function InteractDrawer({
             onClick={openFromSelectionPill}
           >
             <span className="hp-selection-pill-text">
-              💬 批注：「{selectionPreviewText}」
+              💬 留痕：「{selectionPreviewText}」
             </span>
           </button>
           <button
@@ -1069,7 +1069,7 @@ export function InteractDrawer({
           className={`hp-interact-drawer ${
             isMobile ? `is-mobile detent-${mobileDetent}` : "is-desktop"
           }`}
-          aria-label="批注面板"
+          aria-label="留痕面板"
         >
           {isMobile && (
             <div
@@ -1115,14 +1115,14 @@ export function InteractDrawer({
                   <strong>✨ {unreadIds.size} 条新回复 · 点击查看</strong>
                 ) : (
                   <span>
-                    批注{threads.length > 0 ? ` (${threads.length})` : ""}
+                    留痕{threads.length > 0 ? ` (${threads.length})` : ""}
                   </span>
                 )}
               </button>
               <button
                 type="button"
                 className="hp-int-icon-btn"
-                aria-label="关闭批注面板"
+                aria-label="关闭留痕面板"
                 onClick={() => onOpenChange(false)}
               >
                 <CloseSvgIcon />
@@ -1133,7 +1133,7 @@ export function InteractDrawer({
               <header className="hp-interact-header">
                 <div className="hp-interact-title-group">
                   <MessageSquareIcon />
-                  <strong>批注</strong>
+                  <strong>留痕</strong>
                   {queueSummary.activeRunningCount > 0 ? (
                     <span className="hp-int-header-working">
                       <span className="hp-int-pulse-dot" />
@@ -1216,8 +1216,8 @@ export function InteractDrawer({
                   <button
                     type="button"
                     className="hp-int-icon-btn"
-                    aria-label="收起批注面板"
-                    title={`收起批注 (${toggleShortcutLabel} / Esc)`}
+                    aria-label="收起留痕面板"
+                    title={`收起留痕 (${toggleShortcutLabel} / Esc)`}
                     onClick={() => onOpenChange(false)}
                   >
                     <CloseSvgIcon />
@@ -1249,7 +1249,7 @@ export function InteractDrawer({
                 hidden={intent === "question"}
               >
                 <summary>
-                  批注摘要（{threads.length}
+                  留痕摘要（{threads.length}
                   {interactions.filter((i) => i.status === "pending").length > 0
                     ? ` · ${interactions.filter((i) => i.status === "pending").length} 条排队待送达`
                     : ""}
@@ -1268,7 +1268,7 @@ export function InteractDrawer({
                   </div>
                 ) : threads.length === 0 ? (
                   <div className="hp-interact-empty">
-                    <p>暂无批注</p>
+                    <p>暂无留痕</p>
                   </div>
                 ) : (
                   threads.map((thread) => {
@@ -1404,7 +1404,7 @@ export function InteractDrawer({
                                         role="status"
                                       >
                                         <div className="hp-int-resting-title">
-                                          ⏸ 已保存批注 · 等待开发机守护进程上线
+                                          ⏸ 已保存留痕 · 等待开发机守护进程上线
                                         </div>
                                       </div>
                                     );

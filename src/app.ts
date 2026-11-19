@@ -7,7 +7,7 @@ import {
 } from "./common";
 import { parseUpload } from "./upload";
 import { dashboardResponse, assetResponse } from "./dashboard";
-import { Auth, devLoginEnabled, githubOAuthConfigured, randomHex, type AuthConfig } from "./auth";
+import { Auth, devLoginEnabled, githubOAuthConfigured, hash, randomHex, type AuthConfig } from "./auth";
 import { Catalog, type Document, type User, type Version } from "./catalog";
 import { injectSidebarBridge } from "./sidebar-bridge";
 import { InteractStore } from "./interact-store";
@@ -30,7 +30,7 @@ import type {
   RealtimeEvent,
   SessionBindingInput,
 } from "./interact-types";
-import type { Database } from "./database";
+import type { Database, Statement } from "./database";
 import type { ObjectStore } from "./storage";
 
 export type ChangeEvent = RealtimeEvent;
@@ -78,26 +78,24 @@ const json = (data: unknown, status = 200) =>
 const SHARE_SANDBOX_CSP =
   "sandbox allow-scripts allow-forms allow-modals allow-popups allow-popups-to-escape-sandbox allow-downloads";
 
-const SHARE_NOT_FOUND_HTML = `<!doctype html>
+function previewStatusResponse(method: string, text: string, status: number): Response {
+  const html = `<!doctype html>
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>该公开分享链接不存在或已取消公开</title>
-<style>body{margin:0;min-height:100dvh;display:grid;place-items:center;font:15px/1.6 system-ui,-apple-system,sans-serif;background:#f8fafc;color:#334155;padding:24px;box-sizing:border-box}main{max-width:420px;text-align:center}h1{font-size:18px;margin:0 0 8px;color:#0f172a}p{margin:0;color:#64748b;font-size:14px}</style>
+<title>${text}</title>
+<style>:root{color-scheme:light dark}body{margin:0;min-height:100dvh;display:grid;place-items:center;font:15px/1.6 system-ui,-apple-system,sans-serif;background:Canvas;color:CanvasText;padding:24px;box-sizing:border-box}main{max-width:420px;text-align:center}h1{font-size:18px;margin:0}</style>
 </head>
 <body>
 <main>
-<h1>该公开分享链接不存在或已取消公开</h1>
-<p>请确认链接是否完整，或联系分享者重新获取最新链接。</p>
+<h1>${text}</h1>
 </main>
 </body>
 </html>
 `;
-
-function shareNotFoundResponse(method: string): Response {
-  return new Response(method === "HEAD" ? null : SHARE_NOT_FOUND_HTML, {
-    status: 404,
+  return new Response(method === "HEAD" ? null : html, {
+    status,
     headers: {
       "Content-Type": "text/html; charset=utf-8",
       "Cache-Control": "no-store",
@@ -105,9 +103,14 @@ function shareNotFoundResponse(method: string): Response {
       "X-Robots-Tag": "noindex, nofollow",
       "X-Content-Type-Options": "nosniff",
       "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox",
+      ...(status === 200 ? { "X-Html-Preview-Page-State": "fallen" } : {}),
     },
   });
 }
+
+const shareNotFoundResponse = (method: string) =>
+  previewStatusResponse(method, "请向分享者获取开窗链接。", 404);
+const fallenPageResponse = (method: string) => previewStatusResponse(method, "此页已落", 200);
 
 function buildHostPresenceSummary(
   interaction: InteractionRecord,
@@ -277,19 +280,19 @@ export function createApp(options: AppOptions) {
     total: number,
     note: string,
     storage: string,
-    changes?: { title?: string },
+    existing: Document | undefined,
+    title: string | undefined,
   ) {
     const now = new Date().toISOString();
-    const updateStatements = [];
-    if (changes?.title !== undefined) {
-      updateStatements.push({
-        sql: "UPDATE documents SET title = ? WHERE scope = ? AND name = ? AND folder = ? AND deleting = 0",
-        values: [changes.title, doc.scope, doc.name, doc.folder],
+    const statements: Statement[] = [];
+    if (existing && title !== undefined) {
+      statements.push({
+        sql: "UPDATE documents SET title = ? WHERE id = ? AND folder = ? AND deleting = 0",
+        values: [title, existing.id, doc.folder],
       });
     }
-
-    await db.batch([
-      {
+    if (!existing) {
+      statements.push({
         sql: "INSERT INTO documents(id, public_id, scope, name, title, folder, created_at) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING",
         values: [
           doc.id,
@@ -300,24 +303,17 @@ export function createApp(options: AppOptions) {
           doc.folder,
           doc.created_at,
         ],
-      },
-      ...updateStatements,
-      {
-        sql: `INSERT INTO versions(document_id, version, storage_id, created_at, note, files, total_bytes)
-              SELECT d.id, COALESCE((SELECT MAX(version) FROM versions WHERE document_id = d.id), 0) + 1, ?, ?, ?, ?, ?
-              FROM documents d WHERE d.scope = ? AND d.name = ? AND d.folder = ? AND d.deleting = 0`,
-        values: [
-          storage,
-          now,
-          note,
-          JSON.stringify(files),
-          total,
-          doc.scope,
-          doc.name,
-          doc.folder,
-        ],
-      },
-    ]);
+      });
+    }
+    statements.push({
+      sql: `INSERT INTO versions(document_id, version, storage_id, created_at, note, files, total_bytes)
+            SELECT d.id, COALESCE((SELECT MAX(version) FROM versions WHERE document_id = d.id), 0) + 1, ?, ?, ?, ?, ?
+            FROM documents d WHERE d.scope = ? AND d.name = ? AND d.folder = ? AND d.deleting = 0${existing ? " AND d.id = ?" : ""}`,
+      values: [storage, now, note, JSON.stringify(files), total, doc.scope, doc.name, doc.folder,
+        ...(existing ? [existing.id] : []),
+      ],
+    });
+    await db.batch(statements);
 
     const saved = await catalog.named(doc.scope, doc.name);
     if (!saved || saved.folder !== doc.folder) {
@@ -366,14 +362,14 @@ export function createApp(options: AppOptions) {
       await removeFiles(storage, written).catch(() => {});
       throw error;
     }
-    const changes = existing && input.title ? { title: input.title } : undefined;
     const saved = await append(
       doc,
       input.files.map(f => f.path),
       input.files.reduce((sum, f) => sum + f.data.byteLength, 0),
       input.note,
       storage,
-      changes,
+      existing,
+      input.title || undefined,
     );
     const hasDaemonBinding = Boolean(input.hostId || input.opaqueBinding);
     const binding = hasDaemonBinding
@@ -408,9 +404,14 @@ export function createApp(options: AppOptions) {
 
   async function preview(request: Request, user: User) {
     const url = new URL(request.url);
-    const match = /^\/p\/([^/]+)\/(.*)$/.exec(url.pathname);
+    const match = /^\/p\/([^/]+)(?:\/(.*))?$/.exec(url.pathname);
     if (!match) throw new HttpError(404, "Page not found");
-    const doc = catalog.visible(await catalog.document(match[1]), user);
+    const selected = await catalog.document(match[1]);
+    if (selected ? selected.deleting && selected.scope === user.id : await catalog.isFallenPage(match[1], user.id)) {
+      return fallenPageResponse(request.method);
+    }
+    if (match[2] === undefined) throw new HttpError(404, "Page not found");
+    const doc = catalog.visible(selected, user);
     const versions = await catalog.versions(doc.id);
     let path = decodeURIComponent(match[2] || "index.html");
     const fixed = /^v([1-9]\d*)\/(.*)$/.exec(path);
@@ -435,7 +436,7 @@ export function createApp(options: AppOptions) {
     const isHtml = contentType(path).startsWith("text/html");
     const headers = new Headers({
       "Content-Type": contentType(path),
-      "Cache-Control": fixed && !isHtml ? "private, max-age=86400, immutable" : "no-store",
+      "Cache-Control": "no-store",
       "X-Content-Type-Options": "nosniff",
       "Referrer-Policy": "no-referrer",
     });
@@ -464,6 +465,9 @@ export function createApp(options: AppOptions) {
       return shareNotFoundResponse(request.method);
     }
     const doc = await catalog.byShareToken(token);
+    if (doc ? doc.deleting : await catalog.isFallenShare(token)) {
+      return fallenPageResponse(request.method);
+    }
     if (!doc) return shareNotFoundResponse(request.method);
     const latestVersion = await catalog.latestVersion(doc.id);
     if (!latestVersion) return shareNotFoundResponse(request.method);
@@ -895,6 +899,9 @@ export function createApp(options: AppOptions) {
       if (archiveMatch) {
         const doc = await catalog.document(archiveMatch[1]);
         if (!doc || doc.scope !== member.id) {
+          if (!doc && request.method === "DELETE" && await catalog.isFallenPage(archiveMatch[1], member.id)) {
+            return json({ ok: true });
+          }
           throw new HttpError(404, "Document not found");
         }
         if (request.method === "PATCH") {
@@ -917,11 +924,25 @@ export function createApp(options: AppOptions) {
         }
         if (request.method === "DELETE") {
           await db.batch([{ sql: "UPDATE documents SET deleting = 1 WHERE id = ?", values: [doc.id] }]);
-          const versions = await catalog.versions(doc.id);
+          const deleting = await catalog.document(doc.id);
+          if (!deleting) return json({ ok: true });
+          const versions = await catalog.versions(deleting.id);
           for (const version of versions) {
             await removeFiles(version.storage_id, JSON.parse(version.files));
           }
-          await db.batch([{ sql: "DELETE FROM documents WHERE id = ?", values: [doc.id] }]);
+          const [idHash, publicIdHash, shareTokenHash] = await Promise.all([
+            hash(deleting.id),
+            hash(deleting.public_id),
+            deleting.share_token ? hash(deleting.share_token) : null,
+          ]);
+          await db.batch([
+            {
+              sql: `INSERT INTO page_tombstones (id_hash, public_id_hash, owner_id, share_token_hash)
+                    SELECT ?, ?, scope, ? FROM documents WHERE id = ?`,
+              values: [idHash, publicIdHash, shareTokenHash, deleting.id],
+            },
+            { sql: "DELETE FROM documents WHERE id = ?", values: [deleting.id] },
+          ]);
           notify(doc);
           return json({ ok: true });
         }

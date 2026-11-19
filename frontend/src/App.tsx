@@ -544,7 +544,7 @@ function WorkspaceInner({
   );
 
   const loadCatalog = useCallback(
-    async (silent = false) => {
+    async (silent = false, requestedId?: string) => {
       if (!currentUser) return;
       if (!silent) setLoadingCatalog(true);
       try {
@@ -556,13 +556,23 @@ function WorkspaceInner({
         if (!res.ok) throw new Error("目录加载失败");
         const data: CatalogResponse = await res.json();
         const nextArchives = (data.archives || []).slice().sort(compareArchives);
+        const hash = location.hash;
+        const hashId = !loadedOnceRef.current
+          ? new URLSearchParams(hash.slice(1)).get("html")
+          : null;
+        const linkedId = requestedId || hashId;
+        if (linkedId && !nextArchives.some((a) => a.id === linkedId || a.publicId === linkedId)) {
+          const path = `/p/${encodeURIComponent(linkedId)}/`;
+          const link = await fetch(path, { method: "HEAD", redirect: "manual" }).catch(() => null);
+          if (location.hash === hash && link?.headers.get("X-Html-Preview-Page-State") === "fallen") {
+            location.replace(path);
+            return;
+          }
+        }
         setArchives(nextArchives);
         setCatalogLoaded(true);
 
         setSelectedId((prevId) => {
-          const hashId = !loadedOnceRef.current
-            ? new URLSearchParams(location.hash.slice(1)).get("html")
-            : null;
           const savedId = readStorage<string | null>(
             userStorageKey("selected"),
             null
@@ -842,7 +852,7 @@ function WorkspaceInner({
           setSelectedId(docId);
           const found = archivesRef.current.find((a) => a.id === docId);
           if (found) revealArchiveFolder(found);
-          else void loadCatalogRef.current(true);
+          else void loadCatalogRef.current(true, docId);
         }
         setSelectedVersion(v > 0 ? v : null);
         if (intId) {
@@ -950,7 +960,7 @@ function WorkspaceInner({
         if (found) {
           revealArchiveFolder(found);
         } else {
-          void loadCatalogRef.current(true);
+          void loadCatalogRef.current(true, htmlId);
         }
       }
       if (intId) {
@@ -1287,10 +1297,10 @@ function WorkspaceInner({
     try {
       await navigator.clipboard.writeText(url);
       if (showBtnFeedback) triggerCopiedFeedback();
-      toast({ body: "已复制公开链接", type: "info" });
+      toast({ body: "已复制开窗链接", type: "info" });
     } catch {
       setSharePopoverOpen(true);
-      toast({ body: "请手动复制公开链接", type: "info" });
+      toast({ body: "请手动复制开窗链接", type: "info" });
     }
   };
 
@@ -1308,7 +1318,7 @@ function WorkspaceInner({
       }
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
-        throw new Error(errData.error || "公开失败");
+        throw new Error(errData.error || "请重试开窗");
       }
       const data: ShareResponse = await res.json();
       const finalShareUrl = resolveShareUrl(data.shareUrl);
@@ -1340,11 +1350,11 @@ function WorkspaceInner({
       }
 
       toast({
-        body: copied ? "已复制公开链接" : "已公开，请复制链接",
+        body: copied ? "已复制开窗链接" : "请复制开窗链接",
         type: "info",
       });
     } catch (err: any) {
-      toast({ body: err.message || "公开失败", type: "error" });
+      toast({ body: err.message || "请重试开窗", type: "error" });
     } finally {
       setSharingId((prev) => (prev === archive.id ? null : prev));
     }
@@ -1364,7 +1374,7 @@ function WorkspaceInner({
       }
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
-        throw new Error(errData.error || "取消公开失败");
+        throw new Error(errData.error || "请重试掩窗");
       }
       setArchives((prev) =>
         prev.map((item) =>
@@ -1377,9 +1387,9 @@ function WorkspaceInner({
         setSharePopoverOpen(false);
         setCopiedShareFeedback(false);
       }
-      toast({ body: "已取消公开", type: "info" });
+      toast({ body: "已掩窗", type: "info" });
     } catch (err: any) {
-      toast({ body: err.message || "取消公开失败", type: "error" });
+      toast({ body: err.message || "请重试掩窗", type: "error" });
     } finally {
       setSharingId((prev) => (prev === archive.id ? null : prev));
     }
@@ -1468,18 +1478,20 @@ function WorkspaceInner({
       const res = await fetch(`/api/archives/${encodeURIComponent(deleteTarget.id)}`, {
         method: "DELETE",
       });
-      if (!res.ok) throw new Error("删除 HTML 失败");
+      if (!res.ok) throw new Error("请重试落叶");
       const deletedId = deleteTarget.id;
       setDeleteTarget(null);
+      setArchives((prev) => prev.filter((item) => item.id !== deletedId));
+      setIframePool((prev) => prev.filter((entry) => !entry.key.startsWith(`${deleteTarget.publicId}:`)));
       if (selectedId === deletedId) {
         setSharePopoverOpen(false);
         setSelectedId(null);
         setSelectedVersion(null);
       }
-      toast({ body: "已删除", type: "info" });
+      toast({ body: "此页已落", type: "info" });
       await loadCatalog(true);
-    } catch (err: any) {
-      toast({ body: err.message || "删除失败", type: "error" });
+    } catch {
+      toast({ body: "请重试落叶", type: "error" });
     } finally {
       setDeleting(false);
     }
@@ -1800,13 +1812,13 @@ function WorkspaceInner({
               setIsSidebarCollapsed(true);
             }
           }}
-          title={`${item.title} (v${latestVer})${item.shared ? " · 已公开" : ""}`}
+          title={`${item.title} (v${latestVer})${item.shared ? " · 已开窗" : ""}`}
         >
           <FileCodeSvgIcon />
           <span className="hp-file-label">{item.title}</span>
           {item.shared && (
-            <span className="hp-share-pill" title="已公开">
-              公开
+            <span className="hp-share-pill">
+              已开窗
             </span>
           )}
           <span className="hp-file-ver">v{latestVer}</span>
@@ -1835,12 +1847,6 @@ function WorkspaceInner({
             <DropdownMenuItem
               label="重命名标题…"
               onClick={() => openEditorModal("rename", item)}
-            />
-            <DropdownMenuDivider />
-            <DropdownMenuItem
-              label="删除 HTML…"
-              variant="destructive"
-              onClick={() => setDeleteTarget(item)}
             />
           </DropdownMenu>
         </div>
@@ -2185,6 +2191,16 @@ function WorkspaceInner({
                   ))}
               </select>
 
+              <button
+                type="button"
+                className="hp-btn"
+                id="btn-fall"
+                aria-haspopup="dialog"
+                onClick={() => setDeleteTarget(selectedArchive)}
+              >
+                落叶
+              </button>
+
               <div className="hp-share-anchor">
                 {!selectedArchive.shared ? (
                   <button
@@ -2196,7 +2212,7 @@ function WorkspaceInner({
                     onClick={() => void handleShareArchive(selectedArchive)}
                   >
                     {isSharingSelected && <RefreshSvgIcon spinning />}
-                    <span>{isSharingSelected ? "公开中…" : "公开"}</span>
+                    <span>{isSharingSelected ? "开窗中…" : "开窗"}</span>
                   </button>
                 ) : (
                   selectedShareUrl && (
@@ -2211,7 +2227,7 @@ function WorkspaceInner({
                       onClick={() => setSharePopoverOpen((open) => !open)}
                     >
                       <span className="hp-status-dot" aria-hidden="true" />
-                      <span>已公开</span>
+                      <span>已开窗</span>
                       <ChevronDownIcon />
                     </button>
                   )
@@ -2223,7 +2239,7 @@ function WorkspaceInner({
                     className="hp-share-popover"
                     id="share-popover"
                     role="dialog"
-                    aria-label="已公开链接"
+                    aria-label="已开窗链接"
                   >
                     <div className="hp-share-url-box">
                       <code
@@ -2263,7 +2279,7 @@ function WorkspaceInner({
                         disabled={isSharingSelected}
                         onClick={() => void handleUnshareArchive(selectedArchive)}
                       >
-                        {isSharingSelected ? "取消中…" : "取消公开"}
+                        {isSharingSelected ? "掩窗中…" : "掩窗"}
                       </button>
                     </div>
                   </div>
@@ -2280,11 +2296,11 @@ function WorkspaceInner({
                 aria-controls="interact-drawer"
                 title={`${
                   isInteractOpen ? "收起" : "打开"
-                }批注 (${interactShortcutLabel})`}
+                }留痕 (${interactShortcutLabel})`}
                 onClick={toggleInteract}
               >
                 <MessageSquareIcon />
-                <span className="hp-interact-btn-label">批注</span>
+                <span className="hp-interact-btn-label">留痕</span>
                 {(interactBadge.unreadCount > 0 ||
                   interactBadge.workingCount > 0) && (
                   <span
@@ -2841,15 +2857,11 @@ function WorkspaceInner({
 
       <AlertDialog
         isOpen={deleteTarget !== null}
-        onOpenChange={(open) => !open && setDeleteTarget(null)}
-        title={`删除「${deleteTarget?.title || ""}」？`}
-        description={`共 ${
-          deleteTarget?.versions.length || 1
-        } 个版本将永久删除${
-          deleteTarget?.shared ? "，公开链接同步失效" : ""
-        }，不可撤销。`}
-        cancelLabel="取消"
-        actionLabel="删除"
+        onOpenChange={(open) => !open && !deleting && setDeleteTarget(null)}
+        title="叶落，便不再回枝。"
+        description=""
+        cancelLabel="再留留"
+        actionLabel="落下"
         actionVariant="destructive"
         isActionLoading={deleting}
         onAction={handleConfirmDelete}
