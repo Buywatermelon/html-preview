@@ -927,9 +927,12 @@ export function createApp(options: AppOptions) {
           const deleting = await catalog.document(doc.id);
           if (!deleting) return json({ ok: true });
           const versions = await catalog.versions(deleting.id);
+          const keys: string[] = [];
           for (const version of versions) {
-            await removeFiles(version.storage_id, JSON.parse(version.files));
+            for (const file of JSON.parse(version.files) as string[]) keys.push(version.storage_id + file);
           }
+          if (store.deleteMany) await store.deleteMany(keys);
+          else for (const key of keys) await store.delete(key);
           const [idHash, publicIdHash, shareTokenHash] = await Promise.all([
             hash(deleting.id),
             hash(deleting.public_id),
